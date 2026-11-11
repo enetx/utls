@@ -187,6 +187,10 @@ func (uconn *UConn) uLoadSession() error {
 			uconn.sessionController.initSessionTicketExt(session, hello.sessionTicket)
 			uconn.sessionController.setSessionTicketToUConn()
 		} else {
+			if uconn.quic != nil {
+				uconn.HandshakeState.Hello.EarlyData = hello.earlyData
+				uconn.setEarlyDataExtension(hello.earlyData)
+			}
 			uconn.sessionController.initPskExt(session, earlySecret, binderKey, hello.pskIdentities)
 		}
 	}
@@ -197,7 +201,9 @@ func (uconn *UConn) uLoadSession() error {
 func (uconn *UConn) uApplyPatch() {
 	helloLen := len(uconn.HandshakeState.Hello.Raw)
 	if uconn.sessionController.shouldUpdateBinders() {
-		uconn.sessionController.updateBinders()
+		if uconn.echCtx == nil || !uconn.echCtx.customInner {
+			uconn.sessionController.updateBinders()
+		}
 		uconn.sessionController.setPskToUConn()
 	}
 	uAssert(helloLen == len(uconn.HandshakeState.Hello.Raw), "tls: uApplyPatch Failed: the patch should never change the length of the marshaled clientHello")
@@ -494,6 +500,13 @@ func (uconn *UConn) extensionsList() []uint16 {
 }
 
 func (uconn *UConn) computeAndUpdateOuterECHExtension(inner *clientHelloMsg, ech *echClientContext, useKey bool) error {
+	if ech.customInner {
+		restore, err := uconn.setECHOuterExtensions(inner, ech)
+		if err != nil {
+			return err
+		}
+		defer restore()
+	}
 	// This function is mostly copied from
 	// https://github.com/refraction-networking/utls/blob/e430876b1d82fdf582efc57f3992d448e7ab3d8a/ech.go#L408
 	var encapKey []byte
@@ -557,19 +570,32 @@ func (uconn *UConn) computeAndUpdateOuterECHExtension(inner *clientHelloMsg, ech
 		return err
 	}
 
+	if ech.customInner {
+		outer := new(clientHelloMsg)
+		if !outer.unmarshal(uconn.HandshakeState.Hello.Raw) {
+			return errors.New("tls: invalid ECH outer ClientHello")
+		}
+		uconn.HandshakeState.Hello.PskIdentities = mapSlice(outer.pskIdentities, func(i pskIdentity) PskIdentity {
+			return PskIdentity{Label: i.label, ObfuscatedTicketAge: i.obfuscatedTicketAge}
+		})
+		uconn.HandshakeState.Hello.PskBinders = outer.pskBinders
+		uconn.HandshakeState.Hello.QuicTransportParameters = outer.quicTransportParameters
+	}
+
 	return nil
 
 }
 
 func (uconn *UConn) MarshalClientHello() error {
 	if len(uconn.config.EncryptedClientHelloConfigList) > 0 {
-		// Real PSKs must only appear in ClientHelloInner. The custom PSK
-		// controller patches binders in the outer hello, so reject this
-		// combination until it supports the inner transcript. GREASE ECH
-		// does not enter this path and can still be combined with PSK.
+		// Real PSKs must only appear in ClientHelloInner. Without an inner
+		// policy, retain the inherited rejection instead of binding the outer
+		// hello or exposing a private ticket. GREASE-only PSK is unaffected.
 		for _, ext := range uconn.Extensions {
 			if psk, ok := ext.(PreSharedKeyExtension); ok && psk.Len() > 0 {
-				return errors.New("tls: PSK resumption with a custom ECH ClientHello is not supported")
+				if uconn.config.ECHClientHelloInner == nil {
+					return errors.New("tls: PSK resumption with a custom ECH ClientHello requires an inner policy")
+				}
 			}
 		}
 		inner, _, ech, err := uconn.makeClientHello()

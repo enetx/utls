@@ -351,7 +351,8 @@ func (hs *clientHandshakeStateTLS13) processHelloRetryRequest() error {
 		hello.keyShares = hello.keyShares[:1]
 	}
 
-	if len(hello.pskIdentities) > 0 {
+	customECH := hs.echContext != nil && hs.echContext.customInner
+	if len(hello.pskIdentities) > 0 && (!customECH || isInnerHello) {
 		pskSuite := cipherSuiteTLS13ByID(hs.session.cipherSuite)
 		if pskSuite == nil {
 			return c.sendAlert(alertInternalError)
@@ -368,8 +369,10 @@ func (hs *clientHandshakeStateTLS13) processHelloRetryRequest() error {
 				return err
 			}
 
-			if err := computeAndUpdatePSK(hello, hs.binderKey, transcript, hs.suite.finishedHash); err != nil {
-				return err
+			if !customECH {
+				if err := computeAndUpdatePSK(hello, hs.binderKey, transcript, hs.suite.finishedHash); err != nil {
+					return err
+				}
 			}
 		} else {
 			// Server selected a cipher suite incompatible with the PSK.
@@ -379,6 +382,12 @@ func (hs *clientHandshakeStateTLS13) processHelloRetryRequest() error {
 	}
 
 	// [uTLS SECTION BEGINS]
+	if hs.uconn != nil && hello.earlyData {
+		// CH2 cannot offer 0-RTT. Disable the template before either outer
+		// serialization or rebuilding a custom ECH inner.
+		hs.uconn.setEarlyDataExtension(false)
+		hs.uconn.HandshakeState.Hello.EarlyData = false
+	}
 	// crypto/tls code above this point had changed crypto/tls structures in accordance with HRR, and is about
 	// to call default marshaller.
 	// Instead, we fill uTLS-specific structs and call uTLS marshaller.
@@ -431,7 +440,7 @@ func (hs *clientHandshakeStateTLS13) processHelloRetryRequest() error {
 				return err
 			}
 
-			if len(hs.hello.pskIdentities) > 0 {
+			if len(hs.hello.pskIdentities) > 0 && !customECH {
 				for _, ext := range hs.uconn.Extensions {
 					if psk, ok := ext.(PreSharedKeyExtension); ok {
 						if err := psk.UpdateOnHRR(chHash, hs, c.config.time()); err != nil {
@@ -549,6 +558,10 @@ func (hs *clientHandshakeStateTLS13) processServerHello() error {
 
 	if !hs.serverHello.selectedIdentityPresent {
 		return nil
+	}
+	if hs.echContext != nil && hs.echContext.customInner && hs.hello != hs.echContext.innerHello {
+		c.sendAlert(alertIllegalParameter)
+		return errors.New("tls: server selected an outer ECH PSK placeholder")
 	}
 
 	if int(hs.serverHello.selectedIdentity) >= len(hs.hello.pskIdentities) {

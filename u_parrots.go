@@ -3186,6 +3186,9 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 	// reGrease, and point things to each other
 	for _, e := range uconn.Extensions {
 		switch ext := e.(type) {
+		case *EarlyDataExtension:
+			// Eligibility belongs to the new connection, not a reused template.
+			ext.enabled = false
 		case *SNIExtension:
 			if ext.ServerName == "" {
 				ext.ServerName = uconn.config.ServerName

@@ -1,150 +1,155 @@
-// Copyright 2026 The uTLS Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 package tls
 
 import (
 	"bytes"
-	"crypto/x509"
-	"encoding/hex"
+	"context"
+	"errors"
+	"fmt"
+	"io"
 	"testing"
 	"time"
 )
 
-const utlsTestECHConfigsHex = "0045fe0d0041590020002092a01233db2218518ccbbbbc24df20686af417b37388de6460e94011974777090004000100010012636c6f7564666c6172652d6563682e636f6d0000"
-const utlsTestCustomECHPSKError = "tls: PSK resumption with a custom ECH ClientHello is not supported"
-
-func TestUTLSECHPreSharedKeyPrivacy(t *testing.T) {
-	// This is the supported X25519 ECHConfigList used in ech_test.go. A
-	// server private key is unnecessary when inspecting ClientHelloOuter.
-	echConfigs, err := hex.DecodeString(utlsTestECHConfigsHex)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, tc := range []struct {
-		name       string
-		realECH    bool
-		populated  bool
-		wantReject bool
-	}{
-		{name: "RealECHWithPSK", realECH: true, populated: true, wantReject: true},
-		{name: "RealECHWithEmptyPSK", realECH: true},
-		{name: "GREASEECHWithPSK", populated: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			config := &Config{ServerName: "private.example", InsecureSkipVerify: true, OmitEmptyPsk: true}
-			if tc.realECH {
-				config.EncryptedClientHelloConfigList = echConfigs
+func TestCustomECHSessionResumption(t *testing.T) {
+	for _, mode := range []ECHOuterPSKMode{ECHOuterPSKOmit, ECHOuterPSKRandomized} {
+		for _, hrr := range []bool{false, true} {
+			for _, cipher := range []uint16{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384} {
+				t.Run(fmt.Sprintf("mode-%d/hrr-%t/%s", mode, hrr, CipherSuiteName(cipher)), func(t *testing.T) {
+					testCustomECHSessionResumption(t, mode, hrr, cipher)
+				})
 			}
-			client := UClient(nil, config, HelloChrome_120)
-			if err := client.BuildHandshakeStateWithoutSession(); err != nil {
-				t.Fatal(err)
-			}
-
-			label := []byte("private-session-ticket-visible-in-ech-outer")
-			psk := &UtlsPreSharedKeyExtension{OmitEmptyPsk: true}
-			if tc.populated {
-				// Model an initialized extension after the session controller has
-				// loaded a ticket, immediately before ClientHello serialization.
-				psk.PreSharedKeyCommon = PreSharedKeyCommon{
-					Session:    &SessionState{version: VersionTLS13, cipherSuite: TLS_AES_128_GCM_SHA256},
-					Identities: []PskIdentity{{Label: label}},
-					Binders:    [][]byte{make([]byte, 32)},
-				}
-			}
-			client.Extensions = append(client.Extensions, psk)
-
-			err := client.MarshalClientHello()
-			if tc.wantReject {
-				if err == nil {
-					t.Fatalf("real ECH with PSK must fail explicitly until inner binders are supported; ticket exposed in outer: %v", bytes.Contains(client.HandshakeState.Hello.Raw, label))
-				}
-				if err.Error() != utlsTestCustomECHPSKError {
-					t.Fatalf("expected explicit ECH/PSK error, got %v", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			outer := new(clientHelloMsg)
-			if !outer.unmarshal(client.HandshakeState.Hello.Raw) {
-				t.Fatal("invalid marshaled ClientHello")
-			}
-			if len(outer.encryptedClientHello) == 0 {
-				t.Fatal("missing ECH extension")
-			}
-			if tc.populated {
-				if len(outer.pskIdentities) != 1 || !bytes.Equal(outer.pskIdentities[0].label, label) {
-					t.Fatal("GREASE ECH removed the ordinary PSK identity")
-				}
-			} else if len(outer.pskIdentities) != 0 {
-				t.Fatal("empty PSK extension was not omitted")
-			}
-		})
+		}
 	}
 }
 
-func TestUTLSECHCachedSessionPrivacy(t *testing.T) {
-	echConfigs, err := hex.DecodeString(utlsTestECHConfigsHex)
-	if err != nil {
+func TestECHOuterPSKCannotResume(t *testing.T) {
+	a, b := localPipe(t)
+	b.Close()
+	defer a.Close()
+	conn := Client(a, &Config{})
+	hello := &clientHelloMsg{keyShares: []keyShare{{group: X25519}}}
+	hs := &clientHandshakeStateTLS13{
+		c: conn, hello: hello,
+		echContext:  &echClientContext{customInner: true, innerHello: new(clientHelloMsg)},
+		serverHello: &serverHelloMsg{serverShare: keyShare{group: X25519}, selectedIdentityPresent: true},
+	}
+	if err := hs.processServerHello(); err == nil || err.Error() != "tls: server selected an outer ECH PSK placeholder" {
+		t.Fatalf("outer resumption accepted: %v", err)
+	}
+}
+
+func TestRandomizedECHPSK(t *testing.T) {
+	identities := []PskIdentity{{Label: []byte("private-ticket"), ObfuscatedTicketAge: 42}}
+	binders := [][]byte{bytes.Repeat([]byte{1}, 32)}
+	raw := make([]byte, pskExtLen(identities, binders))
+	_, err := readPskIntoBytes(raw, identities, binders)
+	if err != nil && !errors.Is(err, io.EOF) {
 		t.Fatal(err)
 	}
-	for _, realECH := range []bool{false, true} {
-		name := "GREASEECH"
-		if realECH {
-			name = "RealECH"
+	data := bytes.Clone(raw[4:])
+	randomized, err := randomizedECHPSK(data, bytes.NewReader(bytes.Repeat([]byte{2}, 1024)))
+	if err != nil || len(randomized) != len(data) || bytes.Equal(randomized, data) || !bytes.Equal(data, raw[4:]) {
+		t.Fatalf("invalid randomized PSK: %v", err)
+	}
+	for _, invalid := range [][]byte{{}, {0, 1, 0}, {0, 0, 0, 2, 2, 0}} {
+		if _, err := randomizedECHPSK(invalid, bytes.NewReader(nil)); err == nil {
+			t.Fatal("accepted malformed PSK")
 		}
-		t.Run(name, func(t *testing.T) {
-			config := testConfigClient.Clone()
-			config.ServerName = "private.example"
-			config.InsecureSkipVerify = true
-			config.ClientSessionCache = NewLRUClientSessionCache(1)
-			config.OmitEmptyPsk = true
-			if realECH {
-				config.EncryptedClientHelloConfigList = echConfigs
-			}
-			label := []byte("cached-private-session-ticket")
-			config.ClientSessionCache.Put(config.ServerName, &ClientSessionState{session: &SessionState{
-				version:          VersionTLS13,
-				cipherSuite:      TLS_AES_128_GCM_SHA256,
-				createdAt:        uint64(config.time().Unix()),
-				useBy:            uint64(config.time().Add(time.Hour).Unix()),
-				secret:           bytes.Repeat([]byte{1}, 32),
-				peerCertificates: []*x509.Certificate{testECDSAP256Cert.Leaf},
-				ticket:           label,
-			}})
-			preset, err := UTLSIdToSpec(HelloChrome_120)
-			if err != nil {
-				t.Fatal(err)
-			}
-			preset.Extensions = append(preset.Extensions, &UtlsPreSharedKeyExtension{})
-			client := UClient(nil, config, HelloCustom)
-			if err := client.ApplyPreset(&preset); err != nil {
-				t.Fatal(err)
-			}
-			err = client.BuildHandshakeState()
-			if realECH {
-				if err == nil || err.Error() != utlsTestCustomECHPSKError {
-					t.Fatalf("cached session with real ECH must fail before patching binders, got %v", err)
-				}
+	}
+	if _, err := randomizedECHPSK(data, bytes.NewReader(nil)); !errors.Is(err, io.EOF) {
+		t.Fatalf("lost entropy error: %v", err)
+	}
+}
+
+func FuzzRandomizedECHPSK(f *testing.F) {
+	f.Add([]byte{0, 0, 0, 0})
+	f.Add([]byte{0, 6, 0, 0, 0, 0, 0, 0, 0, 1, 0})
+	f.Fuzz(func(t *testing.T, raw []byte) { _, _ = randomizedECHPSK(raw, bytes.NewReader(make([]byte, len(raw)))) })
+}
+
+func testCustomECHSessionResumption(t *testing.T, mode ECHOuterPSKMode, hrr bool, cipher uint16) {
+	clientConfig, key := innerTestConfigPair(t)
+	clientConfig.ServerName = testConfigClient.ServerName
+	clientConfig.RootCAs = testRootCertPool
+	clientConfig.Time = testTime
+	clientConfig.OmitEmptyPsk = true
+	clientConfig.ClientSessionCache = NewLRUClientSessionCache(4)
+	clientConfig.ECHClientHelloInner = func(info ECHClientHelloInfo) (*ECHClientHelloSpec, error) {
+		spec, err := innerTestPolicy(info)
+		if err != nil {
+			return nil, err
+		}
+		spec.OuterPSK = mode
+		spec.CipherSuites = []uint16{cipher}
+		spec.Extensions = append(spec.Extensions, ECHClientHelloExtension{ID: 45, Outer: true})
+		return spec, nil
+	}
+	serverConfig := testConfigServer.Clone()
+	serverConfig.MinVersion = VersionTLS13
+	serverConfig.NextProtos = []string{"h2"}
+	serverConfig.EncryptedClientHelloKeys = []EncryptedClientHelloKey{key}
+	serverConfig.SetSessionTicketKeys([][32]byte{{1, 2, 3}})
+	for attempt := range 2 {
+		if hrr && attempt > 0 {
+			serverConfig.CurvePreferences = []CurveID{CurveP384}
+		}
+		a, b := localPipe(t)
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		server := Server(a, serverConfig)
+		done := make(chan error, 1)
+		go func() {
+			defer a.Close()
+			if err := server.HandshakeContext(ctx); err != nil {
+				done <- err
 				return
 			}
-			if err != nil {
-				t.Fatal(err)
-			}
+			_, err := server.Write([]byte{'x'})
+			done <- err
+		}()
+		client := UClient(b, clientConfig.Clone(), HelloCustom)
+		spec := innerTestSpec()
+		spec.CipherSuites = []uint16{cipher}
+		spec.Extensions[1].(*SupportedCurvesExtension).Curves = []CurveID{X25519, CurveP384}
+		spec.Extensions = append(spec.Extensions, &PSKKeyExchangeModesExtension{Modes: []uint8{PskModeDHE}}, &UtlsPreSharedKeyExtension{})
+		if err := client.ApplyPreset(spec); err != nil {
+			t.Fatal(err)
+		}
+		err := client.HandshakeContext(ctx)
+		if err == nil {
+			var payload [1]byte
+			_, err = io.ReadFull(client, payload[:])
+		}
+		b.Close()
+		cancel()
+		serverErr := <-done
+		if err != nil {
+			t.Fatalf("attempt %d: %v (server: %v)", attempt, err, serverErr)
+		}
+		if serverErr != nil {
+			t.Fatal(serverErr)
+		}
+		state := client.ConnectionState()
+		if !state.ECHAccepted || state.DidResume != (attempt > 0) || len(state.VerifiedChains) == 0 {
+			t.Fatalf("attempt %d: invalid resumption/ECH state: %+v", attempt, state)
+		}
+		if len(client.echCtx.innerHello.pskIdentities) > 0 {
 			outer := new(clientHelloMsg)
 			if !outer.unmarshal(client.HandshakeState.Hello.Raw) {
-				t.Fatal("invalid GREASE ECH ClientHello")
+				t.Fatal("malformed outer")
 			}
-			if len(outer.pskIdentities) != 1 || !bytes.Equal(outer.pskIdentities[0].label, label) {
-				t.Fatal("GREASE ECH did not load the cached session")
+			inner := client.echCtx.innerHello
+			if bytes.Contains(outer.original, inner.pskIdentities[0].label) {
+				t.Fatal("real PSK identity exposed in outer")
 			}
-			if len(outer.pskBinders) != 1 || len(outer.pskBinders[0]) != 32 || bytes.Equal(outer.pskBinders[0], make([]byte, 32)) {
-				t.Fatal("GREASE ECH did not compute the cached session's binder")
+			if mode == ECHOuterPSKOmit && len(outer.pskIdentities) > 0 {
+				t.Fatal("unexpected outer PSK")
 			}
-		})
+			if mode == ECHOuterPSKRandomized && (len(outer.pskIdentities) != 1 || len(outer.pskBinders) != 1 ||
+				len(outer.pskIdentities[0].label) != len(inner.pskIdentities[0].label) ||
+				len(outer.pskBinders[0]) != len(inner.pskBinders[0]) ||
+				bytes.Equal(outer.pskBinders[0], inner.pskBinders[0])) {
+				t.Fatal("invalid outer PSK camouflage")
+			}
+		}
 	}
 }

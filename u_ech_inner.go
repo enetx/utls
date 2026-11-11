@@ -19,6 +19,9 @@ type ECHClientHelloInfo struct {
 	ServerName  string
 	NextProtos  []string
 	QUIC        bool
+	// QUICTransportParameters is the complete engine-owned inner offer.
+	// It can differ from the public transport parameters when ECH is used.
+	QUICTransportParameters []byte
 }
 
 // ECHClientHelloInnerFunc chooses a real inner hello without owning cryptography.
@@ -26,11 +29,16 @@ type ECHClientHelloInfo struct {
 type ECHClientHelloInnerFunc func(ECHClientHelloInfo) (*ECHClientHelloSpec, error)
 
 // ECHClientHelloSpec defines the inner cipher order and expanded extension order.
-// Outer references must form one contiguous run. PSK resumption with custom ECH
-// remains unsupported and is rejected before invoking the callback.
+// Outer references must form one contiguous run. The engine appends and binds
+// its own resumption extension after those references.
 type ECHClientHelloSpec struct {
+	OuterPSK     ECHOuterPSKMode
 	CipherSuites []uint16
 	Extensions   []ECHClientHelloExtension
+	// OuterQUICTransportParameters replaces the public QUIC parameters.
+	// Nil preserves the template. The inner must retain the engine's full offer
+	// as a literal extension when this field is set.
+	OuterQUICTransportParameters []byte
 }
 
 // ECHClientHelloExtension is a literal extension or a reference to the outer.
@@ -67,24 +75,31 @@ func (uconn *UConn) buildECHInner(ech *echClientContext, random []byte) (*client
 	if policy == nil {
 		return nil, errors.New("tls: custom ECH inner callback is nil")
 	}
-	spec, err := policy(ECHClientHelloInfo{
+	info := ECHClientHelloInfo{
 		ClientHello: bytes.Clone(outer.original),
 		ServerName:  hostnameInSNI(uconn.config.ServerName),
 		NextProtos:  slices.Clone(uconn.config.NextProtos),
 		QUIC:        uconn.quic != nil,
-	})
+	}
+	if uconn.quic != nil {
+		info.QUICTransportParameters = bytes.Clone(uconn.quic.transportParams)
+	}
+	spec, err := policy(info)
 	if err != nil {
 		return nil, fmt.Errorf("tls: build ECH inner: %w", err)
 	}
 	if spec == nil || len(spec.CipherSuites) == 0 {
 		return nil, errors.New("tls: empty ECH inner cipher list")
 	}
+	if spec.OuterPSK > ECHOuterPSKRandomized {
+		return nil, errors.New("tls: invalid ECH outer PSK mode")
+	}
 	hasCipher := false
 	for _, id := range spec.CipherSuites {
-		if !isGREASEUint16(id) && cipherSuiteTLS13ByID(id) == nil {
-			return nil, errors.New("tls: ECH inner requires TLS 1.3 cipher suites")
-		}
-		hasCipher = hasCipher || !isGREASEUint16(id)
+		// Legacy cipher identifiers are permitted in a TLS 1.3-only hello.
+		// Negotiation is constrained by supported_versions below, not by
+		// requiring every advertised cipher to be a TLS 1.3 cipher.
+		hasCipher = hasCipher || cipherSuiteTLS13ByID(id) != nil
 	}
 	if !hasCipher {
 		return nil, errors.New("tls: ECH inner lacks a usable cipher suite")
@@ -128,6 +143,13 @@ func (uconn *UConn) buildECHInner(ech *echClientContext, random []byte) (*client
 	if !seen[extensionEncryptedClientHello] {
 		return nil, errors.New("tls: ECH inner lacks its marker")
 	}
+	psk, common, err := uconn.echPSKExtension(ech)
+	if err != nil {
+		return nil, err
+	}
+	if psk != nil {
+		extensions = append(extensions, psk)
+	}
 	raw, err := marshalClientHelloMsg(outer.vers, random, outer.sessionId, spec.CipherSuites, outer.compressionMethods, extensions)
 	if err != nil {
 		return nil, err
@@ -135,6 +157,15 @@ func (uconn *UConn) buildECHInner(ech *echClientContext, random []byte) (*client
 	inner := new(clientHelloMsg)
 	if !inner.unmarshal(raw) {
 		return nil, errors.New("tls: invalid ECH inner ClientHello")
+	}
+	if err := patchECHPSKBinder(inner, common, ech.innerTranscript); err != nil {
+		return nil, err
+	}
+	if spec.OuterQUICTransportParameters != nil {
+		if uconn.quic == nil || slices.Contains(compressed, extensionQUICTransportParameters) ||
+			!seen[extensionQUICTransportParameters] || !bytes.Equal(inner.quicTransportParameters, uconn.quic.transportParams) {
+			return nil, errors.New("tls: ECH inner must retain the full QUIC transport parameters")
+		}
 	}
 	if !bytes.Equal(inner.encryptedClientHello, []byte{1}) || inner.serverName != hostnameInSNI(uconn.config.ServerName) {
 		return nil, errors.New("tls: invalid ECH inner marker or server name")
@@ -157,6 +188,8 @@ func (uconn *UConn) buildECHInner(ech *echClientContext, random []byte) (*client
 		}
 	}
 	ech.customInner = true
+	ech.outerPSK = spec.OuterPSK
+	ech.outerQUICTransportParameters = bytes.Clone(spec.OuterQUICTransportParameters)
 	ech.innerOuterExts = compressed
 	return inner, nil
 }

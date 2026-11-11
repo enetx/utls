@@ -216,9 +216,11 @@ type echClientContext struct {
 	hpkeContext     *hpke.Sender
 	encapsulatedKey []byte
 	//[uTLS] SECTION START
-	encodedInner   []byte
-	customInner    bool
-	innerOuterExts []uint16
+	encodedInner                 []byte
+	customInner                  bool
+	outerPSK                     ECHOuterPSKMode
+	outerQUICTransportParameters []byte
+	innerOuterExts               []uint16
 	//[uTLS] SECTION END
 	innerHello      *clientHelloMsg
 	innerTranscript hash.Hash
@@ -1181,7 +1183,9 @@ func (c *Conn) verifyServerCertificate(certificates [][]byte) error {
 			}
 
 			if len(c.config.InsecureServerNameToVerify) == 0 {
-				opts.DNSName = c.config.ServerName
+				// ECH rejection authenticates public_name, not the private SNI.
+				// RFC 9849 section 6.1.7. c.serverName is the outer name here.
+				opts.DNSName = c.serverName
 			} else if c.config.InsecureServerNameToVerify != "*" {
 				opts.DNSName = c.config.InsecureServerNameToVerify
 			}

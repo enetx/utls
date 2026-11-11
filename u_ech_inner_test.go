@@ -14,6 +14,11 @@ import (
 )
 
 func innerTestConfig(t *testing.T) *Config {
+	config, _ := innerTestConfigPair(t)
+	return config
+}
+
+func innerTestConfigPair(t *testing.T) (*Config, EncryptedClientHelloKey) {
 	t.Helper()
 	key, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
@@ -32,7 +37,7 @@ func innerTestConfig(t *testing.T) *Config {
 	})
 	list := cryptobyte.NewBuilder(nil)
 	list.AddUint16LengthPrefixed(func(list *cryptobyte.Builder) { list.AddBytes(b.BytesOrPanic()) })
-	return &Config{ServerName: "secret.example", MinVersion: VersionTLS13, NextProtos: []string{"h2"}, EncryptedClientHelloConfigList: list.BytesOrPanic()}
+	return &Config{ServerName: "secret.example", MinVersion: VersionTLS13, NextProtos: []string{"h2"}, EncryptedClientHelloConfigList: list.BytesOrPanic()}, EncryptedClientHelloKey{Config: b.BytesOrPanic(), PrivateKey: key.Bytes(), SendAsRetry: true}
 }
 
 func innerTestSpec() *ClientHelloSpec {
@@ -135,6 +140,7 @@ func TestCustomECHInnerValidation(t *testing.T) {
 		"PSK": func(s *ECHClientHelloSpec) {
 			s.Extensions = append(s.Extensions, ECHClientHelloExtension{ID: 41, Data: []byte{0, 0}})
 		},
+		"invalid-outer-PSK": func(s *ECHClientHelloSpec) { s.OuterPSK = ECHOuterPSKMode(255) },
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {

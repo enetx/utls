@@ -197,6 +197,15 @@ func (s *sessionController) setSessionTicketToUConn() {
 func (s *sessionController) setPskToUConn() {
 	uAssert(s.pskExtension != nil && (s.state == PskExtInitialized || s.state == PskExtAllSet), "tls: setPskToUConn failed: invalid state")
 	pskCommon := s.pskExtension.GetPreSharedKeyCommon()
+	if ech := s.uconnRef.echCtx; ech != nil && ech.customInner {
+		// The outer hello contains no real PSK state. Preserve its wire model
+		// while retaining the private session and secrets for the inner.
+		s.uconnRef.HandshakeState.State13.EarlySecret = pskCommon.EarlySecret
+		s.uconnRef.HandshakeState.Session = pskCommon.Session
+		s.uconnRef.HandshakeState.State13.BinderKey = pskCommon.BinderKey
+		s.state = PskExtAllSet
+		return
+	}
 	if s.state == PskExtInitialized {
 		s.uconnRef.HandshakeState.State13.EarlySecret = pskCommon.EarlySecret
 		s.uconnRef.HandshakeState.Session = pskCommon.Session
