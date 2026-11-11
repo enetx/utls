@@ -43,10 +43,25 @@ func assertECHInnerKeyLog(t *testing.T, client *UConn, data []byte, count int) {
 
 type echKeyLogErrorWriter struct{ err error }
 
+func TestECHInnerKeyLogRequiresBoundCustomTranscript(t *testing.T) {
+	var log bytes.Buffer
+	client := UClient(nil, &Config{KeyLogWriter: &log}, HelloCustom)
+	// Upstream construction serializes/compresses its model separately; it
+	// does not promise an already-bound original message at this hook.
+	ech := &echClientContext{innerHello: &clientHelloMsg{}}
+	if err := client.logECHInner(&clientHelloMsg{random: make([]byte, 32)}, ech); err != nil {
+		t.Fatal(err)
+	}
+	if log.Len() != 0 {
+		t.Fatal("logged an unbound upstream inner transcript")
+	}
+}
+
 func (w echKeyLogErrorWriter) Write([]byte) (int, error) { return 0, w.err }
 
 func TestECHInnerKeyLogErrorPreventsClientHello(t *testing.T) {
 	config, _ := innerTestConfigPair(t)
+	config.ECHClientHelloInner = innerTestPolicy
 	want := errors.New("capture writer failed")
 	config.KeyLogWriter = echKeyLogErrorWriter{want}
 	a, b := localPipe(t)

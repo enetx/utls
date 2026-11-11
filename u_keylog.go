@@ -8,7 +8,7 @@ const keyLogLabelClientEarly = "CLIENT_EARLY_TRAFFIC_SECRET"
 // The outer random associates the expanded private hello with its wire record.
 // This diagnostic label is emitted only through an explicit KeyLogWriter.
 func (c *UConn) logECHInner(outer *clientHelloMsg, ech *echClientContext) error {
-	if ech == nil || c.config.KeyLogWriter == nil {
+	if ech == nil || !ech.customInner || c.config.KeyLogWriter == nil {
 		return nil
 	}
 

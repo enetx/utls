@@ -56,14 +56,16 @@ QUIC transport semantics. Surf supplies all filtering rules.
 ECH rejection verifies the public outer name (RFC 9849 section 6.1.7). Surf owns
 authenticated retry policy; the TLS fork only returns the typed rejection error.
 
-An explicit `Config.KeyLogWriter` also receives the diagnostic label
+For a caller-supplied ECH inner policy, an explicit `Config.KeyLogWriter` also receives the diagnostic label
 `UTLS_ECH_INNER_CLIENT_HELLO <outer-random-hex> <expanded-inner-handshake-hex>`.
 This is a nonstandard analysis record containing private SNI, PSK identities and
 binders, alongside the traffic secrets already exposed by that writer. Keep the
 log private. It observes the already-bound transcript immediately before a send
 attempt, including HRR CH2, and never marshals or changes handshake state.
 Speculative builds emit no record; writer errors stop the send, like ordinary
-key-log errors. No record is emitted without an explicit writer or without ECH.
+key-log errors. No diagnostic inner record is emitted without an explicit writer,
+without ECH, or for upstream inner construction (which does not expose a bound
+raw transcript at this hook). Standard key-log records retain their behavior.
 The same writer receives the standard `CLIENT_EARLY_TRAFFIC_SECRET` record
 when QUIC enables early writes. It uses the outer wire random, observes the
 existing secret, and propagates writer errors before activating that key.
