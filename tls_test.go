@@ -34,10 +34,10 @@ import (
 
 	"golang.org/x/crypto/cryptobyte"
 
-	"github.com/refraction-networking/utls/internal/boring"
-	"github.com/refraction-networking/utls/internal/cryptotest"
-	"github.com/refraction-networking/utls/internal/fips140tls"
-	"github.com/refraction-networking/utls/internal/testenv"
+	"github.com/enetx/utls/internal/boring"
+	"github.com/enetx/utls/internal/cryptotest"
+	"github.com/enetx/utls/internal/fips140tls"
+	"github.com/enetx/utls/internal/testenv"
 )
 
 var testTime = func() time.Time { return time.Unix(1476984729, 0) }
@@ -880,7 +880,7 @@ func TestWarningAlertFlood(t *testing.T) {
 }
 
 func TestCloneFuncFields(t *testing.T) {
-	const expectedCount = 10
+	const expectedCount = 11
 	called := 0
 
 	c1 := Config{
@@ -924,6 +924,10 @@ func TestCloneFuncFields(t *testing.T) {
 			called |= 1 << 9
 			return nil, nil
 		},
+		ECHClientHelloInner: func(ECHClientHelloInfo) (*ECHClientHelloSpec, error) {
+			called |= 1 << 10
+			return nil, nil
+		},
 	}
 
 	c2 := c1.Clone()
@@ -938,6 +942,7 @@ func TestCloneFuncFields(t *testing.T) {
 	c2.WrapSession(ConnectionState{}, nil)
 	c2.EncryptedClientHelloRejectionVerify(ConnectionState{})
 	c2.GetEncryptedClientHelloKeys(nil)
+	c2.ECHClientHelloInner(ECHClientHelloInfo{})
 
 	if called != (1<<expectedCount)-1 {
 		t.Fatalf("expected %d calls but saw calls %b", expectedCount, called)
@@ -956,7 +961,7 @@ func TestCloneNonFuncFields(t *testing.T) {
 		switch fn := typ.Field(i).Name; fn {
 		case "Rand":
 			f.Set(reflect.ValueOf(io.Reader(os.Stdin)))
-		case "Time", "GetCertificate", "GetConfigForClient", "VerifyPeerCertificate", "VerifyConnection", "GetClientCertificate", "WrapSession", "UnwrapSession", "EncryptedClientHelloRejectionVerify", "GetEncryptedClientHelloKeys":
+		case "Time", "GetCertificate", "GetConfigForClient", "VerifyPeerCertificate", "VerifyConnection", "GetClientCertificate", "WrapSession", "UnwrapSession", "EncryptedClientHelloRejectionVerify", "GetEncryptedClientHelloKeys", "ECHClientHelloInner":
 			// DeepEqual can't compare functions. If you add a
 			// function field to this list, you must also change
 			// TestCloneFuncFields to ensure that the func field is

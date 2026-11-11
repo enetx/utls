@@ -1,3 +1,11 @@
+# enetx/uTLS
+
+Minimal uTLS fork for externally supplied ECH inner ClientHello layouts.
+Browser policies live in Surf. See [UPSTREAM.md](UPSTREAM.md) for the baseline,
+patch inventory, update procedure and the existing real-ECH/custom-PSK limitation.
+
+Import this fork as `github.com/enetx/utls`. Original upstream documentation follows.
+
 # ![uTLS](logo_small.png) uTLS
 [![Build Status](https://github.com/refraction-networking/utls/actions/workflows/go.yml/badge.svg?branch=master)](https://github.com/refraction-networking/utls/actions/workflows/go.yml) 
 [![godoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://godoc.org/github.com/refraction-networking/utls#UConn)

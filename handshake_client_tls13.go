@@ -18,7 +18,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/refraction-networking/utls/internal/tls13"
+	"github.com/enetx/utls/internal/tls13"
 )
 
 type clientHandshakeStateTLS13 struct {
@@ -390,7 +390,7 @@ func (hs *clientHandshakeStateTLS13) processHelloRetryRequest() error {
 			for _, ext := range hs.uconn.Extensions {
 				// new ks seems to be generated either way
 				if ks, ok := ext.(*KeyShareExtension); ok {
-					ks.KeyShares = keyShares(hs.hello.keyShares).ToPublic()
+					ks.KeyShares = keyShares(hello.keyShares).ToPublic()
 					keyShareExtFound = true
 				}
 			}
@@ -463,6 +463,13 @@ func (hs *clientHandshakeStateTLS13) processHelloRetryRequest() error {
 		hs.hello.keyShares = hello.keyShares
 		hs.echContext.innerHello = hello
 		if hs.uconn != nil && hs.uconn.clientHelloBuildStatus == BuildByUtls {
+			if hs.echContext.customInner {
+				inner, err := hs.uconn.buildECHInner(hs.echContext, hello.random)
+				if err != nil {
+					return err
+				}
+				hs.echContext.innerHello = inner
+			}
 			if err := hs.uconn.computeAndUpdateOuterECHExtension(hs.echContext.innerHello, hs.echContext, false); err != nil {
 				return err
 			}
@@ -572,6 +579,11 @@ func (hs *clientHandshakeStateTLS13) processServerHello() error {
 
 func (hs *clientHandshakeStateTLS13) establishHandshakeKeys() error {
 	c := hs.c
+	if hs.uconn != nil && !c.didHRR {
+		if keys := hs.uconn.keySharesByGroup[hs.serverHello.serverShare.group]; keys != nil {
+			hs.keyShareKeys = keys
+		}
+	}
 
 	ke, err := keyExchangeForCurveID(hs.serverHello.serverShare.group)
 	if err != nil {

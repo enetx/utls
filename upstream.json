@@ -1,0 +1,7 @@
+{
+  "source": "https://github.com/refraction-networking/utls",
+  "version": "v1.8.3-0.20261108164504-a13c59ffe98b",
+  "commit": "a13c59ffe98bb01b2ca14143eb2e887664b1f138",
+  "module": "github.com/enetx/utls",
+  "minimum_go": "1.27"
+}

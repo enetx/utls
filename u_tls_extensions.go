@@ -11,7 +11,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/refraction-networking/utls/dicttls"
+	"github.com/enetx/utls/dicttls"
 	"golang.org/x/crypto/cryptobyte"
 )
 

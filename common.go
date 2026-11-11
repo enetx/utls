@@ -29,7 +29,7 @@ import (
 	"time"
 	_ "unsafe" // for linkname
 
-	"github.com/refraction-networking/utls/internal/fips140tls"
+	"github.com/enetx/utls/internal/fips140tls"
 )
 
 const (
@@ -926,6 +926,12 @@ type Config struct {
 	// encoding described in the final Encrypted Client Hello RFC changes.
 	EncryptedClientHelloConfigList []byte
 
+	// ECHClientHelloInner optionally builds a custom ClientHelloInner from the
+	// current uTLS template. It is called only for real ECH on custom hellos,
+	// including HelloRetryRequest. Nil retains the upstream ECH construction.
+	// The callback must be concurrency safe and return owned data promptly.
+	ECHClientHelloInner ECHClientHelloInnerFunc
+
 	// EncryptedClientHelloRejectionVerify, if not nil, is called when ECH is
 	// rejected by the remote server, in order to verify the ECH provider
 	// certificate in the outer ClientHello. If it returns a non-nil error, the
@@ -1115,6 +1121,7 @@ func (c *Config) Clone() *Config {
 		Renegotiation:                       c.Renegotiation,
 		KeyLogWriter:                        c.KeyLogWriter,
 		EncryptedClientHelloConfigList:      c.EncryptedClientHelloConfigList,
+		ECHClientHelloInner:                 c.ECHClientHelloInner,
 		EncryptedClientHelloRejectionVerify: c.EncryptedClientHelloRejectionVerify,
 		EncryptedClientHelloKeys:            c.EncryptedClientHelloKeys,
 		sessionTicketKeys:                   c.sessionTicketKeys,

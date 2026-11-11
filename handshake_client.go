@@ -24,8 +24,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/refraction-networking/utls/internal/fips140tls"
-	"github.com/refraction-networking/utls/internal/tls13"
+	"github.com/enetx/utls/internal/fips140tls"
+	"github.com/enetx/utls/internal/tls13"
 )
 
 type clientHandshakeState struct {
@@ -216,7 +216,9 @@ type echClientContext struct {
 	hpkeContext     *hpke.Sender
 	encapsulatedKey []byte
 	//[uTLS] SECTION START
-	encodedInner []byte
+	encodedInner   []byte
+	customInner    bool
+	innerOuterExts []uint16
 	//[uTLS] SECTION END
 	innerHello      *clientHelloMsg
 	innerTranscript hash.Hash

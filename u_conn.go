@@ -57,6 +57,9 @@ type UConn struct {
 
 	// echCtx is the echContex returned by makeClientHello()
 	echCtx *echClientContext
+
+	// Retain each generated share until the server selects its group.
+	keySharesByGroup map[CurveID]*keySharePrivateKeys
 }
 
 // UClient returns a new uTLS client, with behavior depending on clientHelloID.
@@ -359,13 +362,12 @@ func (c *UConn) handshakeContext(ctx context.Context) (ret error) {
 
 	// [uTLS section begins]
 	if c.isClient {
-		err := c.BuildHandshakeState()
-		if err != nil {
-			return err
-		}
+		c.handshakeErr = c.BuildHandshakeState()
 	}
 	// [uTLS section ends]
-	c.handshakeErr = c.handshakeFn(handshakeCtx)
+	if c.handshakeErr == nil {
+		c.handshakeErr = c.handshakeFn(handshakeCtx)
+	}
 	if c.handshakeErr == nil {
 		c.handshakes++
 	} else {
@@ -499,7 +501,13 @@ func (uconn *UConn) computeAndUpdateOuterECHExtension(inner *clientHelloMsg, ech
 		encapKey = ech.encapsulatedKey
 	}
 
-	encodedInner, err := encodeInnerClientHelloReorderOuterExts(inner, int(ech.config.MaxNameLength), uconn.extensionsList())
+	var encodedInner []byte
+	var err error
+	if ech.customInner {
+		encodedInner, err = encodeInnerClientHelloFromRaw(inner, ech.innerOuterExts, int(ech.config.MaxNameLength))
+	} else {
+		encodedInner, err = encodeInnerClientHelloReorderOuterExts(inner, int(ech.config.MaxNameLength), uconn.extensionsList())
+	}
 	if err != nil {
 		return err
 	}
@@ -574,6 +582,13 @@ func (uconn *UConn) MarshalClientHello() error {
 		inner.supportedSignatureAlgorithms = uconn.HandshakeState.Hello.SupportedSignatureAlgorithms
 		inner.sessionId = uconn.HandshakeState.Hello.SessionId
 		inner.supportedCurves = uconn.HandshakeState.Hello.SupportedCurves
+
+		if uconn.config.ECHClientHelloInner != nil {
+			inner, err = uconn.buildECHInner(ech, inner.random)
+			if err != nil {
+				return err
+			}
+		}
 
 		ech.innerHello = inner
 

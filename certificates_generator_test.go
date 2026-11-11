@@ -19,6 +19,7 @@ import (
 	"encoding/pem"
 	"flag"
 	"fmt"
+	"go/format"
 	"math/big"
 	"os"
 	"strings"
@@ -26,8 +27,8 @@ import (
 	"testing/cryptotest"
 	"time"
 
-	icryptotest "github.com/refraction-networking/utls/internal/cryptotest"
-	"github.com/refraction-networking/utls/internal/testenv"
+	icryptotest "github.com/enetx/utls/internal/cryptotest"
+	"github.com/enetx/utls/internal/testenv"
 )
 
 var generate = flag.Bool("generate", false, "regenerate certificates_test.go")
@@ -468,8 +469,12 @@ func newTestCertPool(certPEM string) *x509.CertPool {
 }
 `)
 
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if *generate {
-		if err := os.WriteFile("certificates_test.go", buf.Bytes(), 0644); err != nil {
+		if err := os.WriteFile("certificates_test.go", formatted, 0644); err != nil {
 			t.Fatal(err)
 		}
 		t.Log("wrote certificates_test.go")
@@ -481,7 +486,7 @@ func newTestCertPool(certPEM string) *x509.CertPool {
 		}
 		// Git may check out the fixture with CRLF line endings on Windows.
 		existing = bytes.ReplaceAll(existing, []byte("\r\n"), []byte("\n"))
-		if !bytes.Equal(existing, buf.Bytes()) {
+		if !bytes.Equal(existing, formatted) {
 			t.Fatal("certificates_test.go is out of date; run go generate to update it")
 		}
 	}

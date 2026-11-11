@@ -19,7 +19,7 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/refraction-networking/utls/dicttls"
+	"github.com/enetx/utls/dicttls"
 )
 
 var ErrUnknownClientHelloID = errors.New("tls: unknown ClientHelloID")
@@ -3121,6 +3121,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 		uconn.HandshakeState.State13.KeyShareKeys = &KeySharePrivateKeys{}
 	}
 	uconn.echCtx = ech
+	uconn.keySharesByGroup = make(map[CurveID]*keySharePrivateKeys)
 	hello := uconn.HandshakeState.Hello
 
 	switch len(hello.Random) {
@@ -3240,6 +3241,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 					}
 					ext.KeyShares[i].Data = mlkemKey.EncapsulationKey().Bytes()
 					uconn.HandshakeState.State13.KeyShareKeys.Mlkem = mlkemKey
+					uconn.keySharesByGroup[curveID] = &keySharePrivateKeys{mlkem: mlkemKey}
 				} else if curveID == X25519MLKEM768 || curveID == X25519Kyber768Draft00 {
 					if isClassicalReuse {
 						return fmt.Errorf("hybrid keyshare reuse mismatch: classical marker is invalid for hybrid group %v", curveID)
@@ -3271,6 +3273,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 					}
 					uconn.HandshakeState.State13.KeyShareKeys.Mlkem = mlkemKey
 					uconn.HandshakeState.State13.KeyShareKeys.MlkemEcdhe = ecdheKey
+					uconn.keySharesByGroup[curveID] = &keySharePrivateKeys{mlkem: mlkemKey, mlkemEcdhe: ecdheKey}
 					if isHybridReuse {
 						expectedClassical, _ := classicalCurveForHybrid(curveID)
 						reusableClassicalKeys[expectedClassical] = append(
@@ -3293,6 +3296,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 						reusableClassicalKeys[curveID] = keysForCurve[1:]
 
 						ext.KeyShares[i].Data = reusedKey.PublicKey().Bytes()
+						uconn.keySharesByGroup[curveID] = &keySharePrivateKeys{ecdhe: reusedKey}
 						if !preferredCurveIsSet {
 							// only do this once for the first non-grease curve
 							uconn.HandshakeState.State13.KeyShareKeys.Ecdhe = reusedKey
@@ -3308,6 +3312,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 					}
 
 					ext.KeyShares[i].Data = ecdheKey.PublicKey().Bytes()
+					uconn.keySharesByGroup[curveID] = &keySharePrivateKeys{ecdhe: ecdheKey}
 					if !preferredCurveIsSet {
 						// only do this once for the first non-grease curve
 						uconn.HandshakeState.State13.KeyShareKeys.Ecdhe = ecdheKey
