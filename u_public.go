@@ -831,6 +831,15 @@ func (css *ClientSessionState) SetUseBy(useBy uint64) {
 	css.session.useBy = useBy
 }
 
+// UseBy returns the TLS 1.3 session ticket's expiration time in Unix seconds.
+// Zero means that no TLS 1.3 ticket lifetime is available.
+func (css *ClientSessionState) UseBy() uint64 {
+	if css == nil || css.session == nil || css.session.version != VersionTLS13 {
+		return 0
+	}
+	return css.session.useBy
+}
+
 func (css *ClientSessionState) SetAgeAdd(ageAdd uint32) {
 	if css.session == nil {
 		css.session = &SessionState{}

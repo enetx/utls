@@ -23,6 +23,7 @@ Servers retain upstream behavior.
 | Opt-in expanded inner capture for wire comparisons | `u_keylog.go`, key-log/PSK tests | one send-attempt hook in `u_handshake_client.go` and one in the TLS 1.3 HRR path |
 | Standard QUIC early traffic key-log record | label in `u_keylog.go`; QUIC key-log tests | `CLIENT_EARLY_TRAFFIC_SECRET` write before activating the early write key in both client paths |
 | Account for the new callback in Config clone audits | existing tests | two clone tests in `tls_test.go` |
+| Read-only TLS 1.3 ticket expiry | `u_session_lifetime_test.go` | `ClientSessionState.UseBy` beside the existing public `SetUseBy` in `u_public.go`; no handshake changes |
 
 Test-only formatting: the certificate generator applies `go/format` before
 writing or comparing its fixture, so generated files satisfy the CI format check.
