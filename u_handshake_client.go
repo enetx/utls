@@ -492,6 +492,10 @@ func (c *UConn) clientHandshake(ctx context.Context) (err error) {
 
 	c.serverName = hello.serverName
 
+	if err := c.logECHInner(hello, ech); err != nil {
+		return err
+	}
+
 	if _, err := c.writeHandshakeRecord(hello, nil); err != nil {
 		return err
 	}
@@ -512,6 +516,9 @@ func (c *UConn) clientHandshake(ctx context.Context) (err error) {
 			return err
 		}
 		earlyTrafficSecret := earlySecret.ClientEarlyTrafficSecret(transcript)
+		if err := c.config.writeKeyLog(keyLogLabelClientEarly, hello.random, earlyTrafficSecret); err != nil {
+			return err
+		}
 		c.quicSetWriteSecret(QUICEncryptionLevelEarly, suite.id, earlyTrafficSecret)
 	}
 

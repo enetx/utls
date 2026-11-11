@@ -90,6 +90,9 @@ func testCustomECHSessionResumption(t *testing.T, mode ECHOuterPSKMode, hrr bool
 	serverConfig.EncryptedClientHelloKeys = []EncryptedClientHelloKey{key}
 	serverConfig.SetSessionTicketKeys([][32]byte{{1, 2, 3}})
 	for attempt := range 2 {
+		var keyLog bytes.Buffer
+		clientConfig.KeyLogWriter = &keyLog
+
 		if hrr && attempt > 0 {
 			serverConfig.CurvePreferences = []CurveID{CurveP384}
 		}
@@ -114,6 +117,12 @@ func testCustomECHSessionResumption(t *testing.T, mode ECHOuterPSKMode, hrr bool
 		if err := client.ApplyPreset(spec); err != nil {
 			t.Fatal(err)
 		}
+		if err := client.BuildHandshakeState(); err != nil {
+			t.Fatal(err)
+		}
+		if keyLog.Len() != 0 {
+			t.Fatal("building an unsent ClientHello wrote a key-log record")
+		}
 		err := client.HandshakeContext(ctx)
 		if err == nil {
 			var payload [1]byte
@@ -132,6 +141,11 @@ func testCustomECHSessionResumption(t *testing.T, mode ECHOuterPSKMode, hrr bool
 		if !state.ECHAccepted || state.DidResume != (attempt > 0) || len(state.VerifiedChains) == 0 {
 			t.Fatalf("attempt %d: invalid resumption/ECH state: %+v", attempt, state)
 		}
+		keyLogCount := 1
+		if hrr && attempt > 0 {
+			keyLogCount++
+		}
+		assertECHInnerKeyLog(t, client, keyLog.Bytes(), keyLogCount)
 		if len(client.echCtx.innerHello.pskIdentities) > 0 {
 			outer := new(clientHelloMsg)
 			if !outer.unmarshal(client.HandshakeState.Hello.Raw) {

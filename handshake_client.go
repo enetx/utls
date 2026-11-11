@@ -305,6 +305,9 @@ func (c *Conn) clientHandshake(ctx context.Context) (err error) {
 			return err
 		}
 		earlyTrafficSecret := earlySecret.ClientEarlyTrafficSecret(transcript)
+		if err := c.config.writeKeyLog(keyLogLabelClientEarly, hello.random, earlyTrafficSecret); err != nil {
+			return err
+		}
 		c.quicSetWriteSecret(QUICEncryptionLevelEarly, suite.id, earlyTrafficSecret)
 	}
 

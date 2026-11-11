@@ -502,6 +502,12 @@ func (hs *clientHandshakeStateTLS13) processHelloRetryRequest() error {
 		hs.hello = hello
 	}
 
+	if hs.uconn != nil {
+		if err := hs.uconn.logECHInner(hs.hello, hs.echContext); err != nil {
+			return err
+		}
+	}
+
 	if _, err := hs.c.writeHandshakeRecord(hs.hello, hs.transcript); err != nil {
 		return err
 	}

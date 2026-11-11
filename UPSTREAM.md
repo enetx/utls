@@ -20,6 +20,8 @@ Servers retain upstream behavior.
 | Eligible custom QUIC early data and inner early-traffic transcript | `u_early_data.go` | `uLoadSession`, `u_handshake_client.go`, HRR template update |
 | Restricted public QUIC parameters with complete inner offer | `u_ech_quic_test.go`, callback fields | `buildECHInner` validation and outer template serialization |
 | Public-name authentication after ECH rejection | Surf end-to-end certificate tests | one DNSName assignment in `handshake_client.go` |
+| Opt-in expanded inner capture for wire comparisons | `u_keylog.go`, key-log/PSK tests | one send-attempt hook in `u_handshake_client.go` and one in the TLS 1.3 HRR path |
+| Standard QUIC early traffic key-log record | label in `u_keylog.go`; QUIC key-log tests | `CLIENT_EARLY_TRAFFIC_SECRET` write before activating the early write key in both client paths |
 | Account for the new callback in Config clone audits | existing tests | two clone tests in `tls_test.go` |
 
 Test-only formatting: the certificate generator applies `go/format` before
@@ -53,6 +55,18 @@ QUIC transport semantics. Surf supplies all filtering rules.
 
 ECH rejection verifies the public outer name (RFC 9849 section 6.1.7). Surf owns
 authenticated retry policy; the TLS fork only returns the typed rejection error.
+
+An explicit `Config.KeyLogWriter` also receives the diagnostic label
+`UTLS_ECH_INNER_CLIENT_HELLO <outer-random-hex> <expanded-inner-handshake-hex>`.
+This is a nonstandard analysis record containing private SNI, PSK identities and
+binders, alongside the traffic secrets already exposed by that writer. Keep the
+log private. It observes the already-bound transcript immediately before a send
+attempt, including HRR CH2, and never marshals or changes handshake state.
+Speculative builds emit no record; writer errors stop the send, like ordinary
+key-log errors. No record is emitted without an explicit writer or without ECH.
+The same writer receives the standard `CLIENT_EARLY_TRAFFIC_SECRET` record
+when QUIC enables early writes. It uses the outer wire random, observes the
+existing secret, and propagates writer errors before activating that key.
 
 ## Updating
 
