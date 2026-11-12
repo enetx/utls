@@ -676,6 +676,9 @@ func (hs *clientHandshakeStateTLS13) readServerParameters() error {
 		return err
 	}
 	c.clientProtocol = encryptedExtensions.alpnProtocol
+	if err := hs.readServerPadding(encryptedExtensions); err != nil {
+		return err
+	}
 
 	// [UTLS SECTION STARTS]
 	if hs.uconn != nil {

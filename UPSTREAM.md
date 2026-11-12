@@ -24,6 +24,7 @@ Servers retain upstream behavior.
 | Standard QUIC early traffic key-log record | label in `u_keylog.go`; QUIC key-log tests | `CLIENT_EARLY_TRAFFIC_SECRET` write before activating the early write key in both client paths |
 | Account for the new callback in Config clone audits | existing tests | two clone tests in `tls_test.go` |
 | Read-only TLS 1.3 ticket expiry | `u_session_lifetime_test.go` | `ClientSessionState.UseBy` beside the existing public `SetUseBy` in `u_public.go`; no handshake changes |
+| Optional TLS server-padding response validation | `u_server_padding.go`, `u_server_padding_test.go` | Two EncryptedExtensions presence/length fields and parser branch in `u_handshake_messages.go`; one call in `handshake_client_tls13.go`. The request is supplied through the existing GenericExtension API; no browser values are embedded. |
 
 Test-only formatting: the certificate generator applies `go/format` before
 writing or comparing its fixture, so generated files satisfy the CI format check.

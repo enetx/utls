@@ -54,6 +54,8 @@ func (m *utlsCompressedCertificateMsg) unmarshal(data []byte) bool {
 }
 
 type utlsEncryptedExtensionsMsgExtraFields struct {
+	serverPaddingPresent         bool
+	serverPaddingLength          int
 	applicationSettings          []byte
 	applicationSettingsCodepoint uint16
 	customExtension              []byte
@@ -61,6 +63,9 @@ type utlsEncryptedExtensionsMsgExtraFields struct {
 
 func (m *encryptedExtensionsMsg) utlsUnmarshal(extension uint16, extData cryptobyte.String) bool {
 	switch extension {
+	case extensionServerPadding:
+		m.utls.serverPaddingPresent = true
+		m.utls.serverPaddingLength = len(extData)
 	case utlsExtensionApplicationSettings:
 		fallthrough
 	case utlsExtensionApplicationSettingsNew:
