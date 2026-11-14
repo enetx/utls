@@ -25,6 +25,7 @@ Servers retain upstream behavior.
 | Account for the new callback in Config clone audits | existing tests | two clone tests in `tls_test.go` |
 | Read-only TLS 1.3 ticket expiry | `u_session_lifetime_test.go` | `ClientSessionState.UseBy` beside the existing public `SetUseBy` in `u_public.go`; no handshake changes |
 | Optional TLS server-padding response validation | `u_server_padding.go`, `u_server_padding_test.go` | Two EncryptedExtensions presence/length fields and parser branch in `u_handshake_messages.go`; one call in `handshake_client_tls13.go`. The request is supplied through the existing GenericExtension API; no browser values are embedded. |
+| Additional untrusted issuer candidates for elided server chains | `u_certificate_intermediates.go`, pool-isolation test | `Config.CertificateIntermediates` and Clone; two candidate-pool initializations in ordinary and ECH-rejection server verification. Root ownership, normal verification and callbacks are preserved. Surf supplies browser data and verified H1/H2/H3 regressions. |
 
 Test-only formatting: the certificate generator applies `go/format` before
 writing or comparing its fixture, so generated files satisfy the CI format check.

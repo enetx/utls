@@ -711,6 +711,13 @@ type Config struct {
 	// If RootCAs is nil, TLS uses the host's root CA set.
 	RootCAs *x509.CertPool
 
+	// CertificateIntermediates supplies additional, untrusted issuer candidates
+	// when verifying a server certificate chain. It does not add trust anchors:
+	// the chain must still verify against RootCAs or the host's root CA set.
+	// Nil uses only intermediates sent by the peer. Like RootCAs, this pool must
+	// not be modified while the configuration is in use.
+	CertificateIntermediates *x509.CertPool
+
 	// NextProtos is a list of supported application level protocols, in
 	// order of preference. If both peers support ALPN, the selected
 	// protocol will be one from this list, and the connection will fail
@@ -1096,6 +1103,7 @@ func (c *Config) Clone() *Config {
 		VerifyPeerCertificate:               c.VerifyPeerCertificate,
 		VerifyConnection:                    c.VerifyConnection,
 		RootCAs:                             c.RootCAs,
+		CertificateIntermediates:            c.CertificateIntermediates,
 		NextProtos:                          c.NextProtos,
 		ApplicationSettings:                 c.ApplicationSettings,
 		ServerName:                          c.ServerName,

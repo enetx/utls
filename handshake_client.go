@@ -1177,7 +1177,7 @@ func (c *Conn) verifyServerCertificate(certificates [][]byte) error {
 				Roots:       c.config.RootCAs,
 				CurrentTime: c.config.time(),
 				// DNSName:       c.serverName, // [uTLS]
-				Intermediates: x509.NewCertPool(),
+				Intermediates: c.config.certificateIntermediates(),
 			}
 
 			// [UTLS SECTION START]
@@ -1215,7 +1215,7 @@ func (c *Conn) verifyServerCertificate(certificates [][]byte) error {
 			Roots:       c.config.RootCAs,
 			CurrentTime: c.config.time(),
 			// DNSName:       c.serverName, // [uTLS]
-			Intermediates: x509.NewCertPool(),
+			Intermediates: c.config.certificateIntermediates(),
 		}
 
 		if c.config.InsecureSkipTimeVerify {

@@ -972,7 +972,7 @@ func TestCloneNonFuncFields(t *testing.T) {
 			}))
 		case "NameToCertificate":
 			f.Set(reflect.ValueOf(map[string]*Certificate{"a": nil}))
-		case "RootCAs", "ClientCAs":
+		case "RootCAs", "ClientCAs", "CertificateIntermediates":
 			f.Set(reflect.ValueOf(x509.NewCertPool()))
 		case "ClientSessionCache":
 			f.Set(reflect.ValueOf(NewLRUClientSessionCache(10)))
